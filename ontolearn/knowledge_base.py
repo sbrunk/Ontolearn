@@ -1,6 +1,8 @@
 import logging
 from typing import Dict, Iterable, Optional, Callable, overload, Union
 
+from ontolearn.core.owl.utils import OperandSetTransform
+
 from .abstracts import AbstractKnowledgeBase
 from .concept_generator import ConceptGenerator
 from .core.owl.utils import OWLClassExpressionLengthMetric
@@ -242,12 +244,19 @@ class KnowledgeBase(AbstractKnowledgeBase, ConceptGenerator):
             raise TypeError
         if ce in self._ind_cache:
             return
+        orig_ce = ce
+        ce = OperandSetTransform().simplify(ce)
+        if ce in self._ind_cache:
+            self._ind_cache[orig_ce] = self._ind_cache[ce]
+            return
         from owlapy.fast_instance_checker import OWLReasoner_FastInstanceChecker
         if isinstance(self._reasoner, OWLReasoner_FastInstanceChecker):
             self._ind_cache[ce] = self._reasoner._find_instances(ce)  # performance hack
         else:
             temp = self._reasoner.instances(ce)
             self._ind_cache[ce] = self._ind_enc(temp)
+        if orig_ce != ce:
+            self._ind_cache[orig_ce] = self._ind_cache[ce]
 
     def _maybe_cache_individuals(self, ce: OWLClassExpression) -> Iterable[OWLNamedIndividual]:
         if self.use_individuals_cache:
