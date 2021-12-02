@@ -173,7 +173,7 @@ class EvaluatedConceptTentris(EvaluatedConcept):
 
 
 class TentrisKnowledgeBase(KnowledgeBase):
-    __slots__ = 'endpoint_url', 'endpoint_timeout', 'async_client', 'tasks'
+    __slots__ = 'endpoint_url', 'endpoint_timeout', 'async_client', 'tasks', '_total_req', '_current_req'
 
     _ontology: TentrisOntology
     endpoint_url: str
@@ -193,6 +193,8 @@ class TentrisKnowledgeBase(KnowledgeBase):
                                                                     pool=self.endpoint_timeout * (1 + self.tasks)),
                                               limits=httpx.Limits(max_connections=self.tasks,
                                                                   max_keepalive_connections=self.tasks))
+        self._total_req = 0
+        self._current_req = 0
 
         self._ontology = TentrisOntology(self.path, self.endpoint_url)
         self._reasoner = TentrisReasoner(self._ontology)
@@ -259,13 +261,16 @@ class TentrisKnowledgeBase(KnowledgeBase):
         ce = _tentris_render(concept.get_nnf())
         metric = _Metric_map.get(type(quality_func))
         # workaround tentris bug
+        id_ = self._total_req + 1
         if metric == 'f1_score':
             metric_kv = dict()
         else:
             metric_kv = {'metric': metric}
         try:
             # async with httpx.AsyncClient() as client:
-            logger.debug(f"START:{ce}")
+            self._total_req += 1
+            self._current_req += 1
+            logger.debug(f"START:{id_} -- total:{self._total_req} current:{self._current_req} -- {ce}")
             res = await self.async_client.get(
                 self.endpoint_url + '/class_expression_quality',
                 params={
@@ -273,10 +278,13 @@ class TentrisKnowledgeBase(KnowledgeBase):
                     'class_expression': ce,
                     'learning_problem_id': str(encoded_learning_problem.id)
                 })
-            logger.debug(f"E N D:{ce}")
+            logger.debug(f"E N D:{id_} -- total:{self._total_req} current:{self._current_req} -- ")
+            self._current_req -= 1
         except httpx.ReadTimeout:
             logger.error("Could not resolve << %s >> using Tentris@%s", ce, encoded_learning_problem.id)
             e.q = 0
             return e
         e.q = float(res.text)
+        await res.aclose()
+        logger.debug(f"CLOSE:{id_}")
         return e
