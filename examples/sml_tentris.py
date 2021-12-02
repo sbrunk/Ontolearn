@@ -33,6 +33,7 @@ async def run_async(data_file, pos_file, neg_file):
                 iter_bound=1_000_000,
                 max_num_of_concepts_tested=1_000_000)
     await alg.fit_async(lp)
+    await kb.async_client.aclose()
     # render = ManchesterOWLSyntaxOWLObjectRenderer()
     render = DLSyntaxObjectRenderer()
     print("solutions:")

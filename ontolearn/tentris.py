@@ -173,7 +173,7 @@ class EvaluatedConceptTentris(EvaluatedConcept):
 
 
 class TentrisKnowledgeBase(KnowledgeBase):
-    __slots__ = 'endpoint_url', 'endpoint_timeout', 'async_client'
+    __slots__ = 'endpoint_url', 'endpoint_timeout', 'async_client', 'tasks'
 
     _ontology: TentrisOntology
     endpoint_url: str
@@ -185,10 +185,14 @@ class TentrisKnowledgeBase(KnowledgeBase):
                  individuals_cache_size=128,
                  ):
         AbstractKnowledgeBase.__init__(self)
-        self.async_client = httpx.AsyncClient()
         self.path = path
         self.endpoint_url = 'http://localhost:8131'
-        self.endpoint_timeout = 50.0
+        self.endpoint_timeout = 15.0
+        self.tasks = 8
+        self.async_client = httpx.AsyncClient(timeout=httpx.Timeout(self.endpoint_timeout,
+                                                                    pool=self.endpoint_timeout * (1 + self.tasks)),
+                                              limits=httpx.Limits(max_connections=self.tasks,
+                                                                  max_keepalive_connections=self.tasks))
 
         self._ontology = TentrisOntology(self.path, self.endpoint_url)
         self._reasoner = TentrisReasoner(self._ontology)
@@ -260,16 +264,16 @@ class TentrisKnowledgeBase(KnowledgeBase):
         else:
             metric_kv = {'metric': metric}
         try:
-            async with httpx.AsyncClient() as client:
-                print(f"START:{ce}")
-                res = await client.get(self.endpoint_url + '/class_expression_quality',
-                                       params={
-                                           **metric_kv,
-                                           'class_expression': ce,
-                                           'learning_problem_id': str(encoded_learning_problem.id)
-                                       },
-                                       timeout=self.endpoint_timeout)
-                print(f"E N D:{ce}")
+            # async with httpx.AsyncClient() as client:
+            logger.debug(f"START:{ce}")
+            res = await self.async_client.get(
+                self.endpoint_url + '/class_expression_quality',
+                params={
+                    **metric_kv,
+                    'class_expression': ce,
+                    'learning_problem_id': str(encoded_learning_problem.id)
+                })
+            logger.debug(f"E N D:{ce}")
         except httpx.ReadTimeout:
             logger.error("Could not resolve << %s >> using Tentris@%s", ce, encoded_learning_problem.id)
             e.q = 0

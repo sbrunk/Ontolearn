@@ -243,15 +243,15 @@ class CELOE(BaseConceptLearner[OENode]):
                 if ref.len < minimum_length:
                     # ignoring refinement, it does not satisfy minimum_length condition
                     continue
+                if ref.concept in self.search_tree:
+                    # ignoring refinement, it has been refined from another parent
+                    continue
 
                 evaluated_refs.append(self._eval_node_async(ref))
 
             import asyncio
             for task in asyncio.as_completed(evaluated_refs):
-                res = await task
-                if not res:
-                    continue
-                ref, eval_ = res
+                ref, eval_ = await task
 
                 # note: tree_parent has to be equal to node_tree_parent(ref.parent_node)!
                 added = self._add_node_evald(ref, eval_, tree_parent)
@@ -320,9 +320,6 @@ class CELOE(BaseConceptLearner[OENode]):
         #  It might be the case that new path to ref.concept is a better path. Hence, we should update its parent
         #  depending on the new heuristic value.
         #  Solution: If concept exists we should compare its first heuristic value  with the new one
-        if ref.concept in self.search_tree:
-            # ignoring refinement, it has been refined from another parent
-            return False
         res = await self.kb.evaluate_concept_async(ref.concept, self.quality_func, self._learning_problem)
         return ref, res
 
