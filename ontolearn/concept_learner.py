@@ -252,6 +252,8 @@ class CELOE(BaseConceptLearner[OENode]):
             import asyncio
             for task in asyncio.as_completed(evaluated_refs):
                 ref, eval_ = await task
+            # for task in await asyncio.gather(*evaluated_refs):
+            #     ref, eval_ = task
 
                 # note: tree_parent has to be equal to node_tree_parent(ref.parent_node)!
                 added = self._add_node_evald(ref, eval_, tree_parent)

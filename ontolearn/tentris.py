@@ -54,11 +54,12 @@ class EncodedPosNegLPStandardTentris:
 
 
 class TentrisOntology(OWLOntology):
-    __slots__ = '_path', '_endpoint_url', '_backing_mgr', '_backing_onto'
+    __slots__ = '_path', '_endpoint_url', '_backing_mgr', '_backing_onto', '_endpoint_timeout'
 
-    def __init__(self, path: str, endpoint_url: str):
+    def __init__(self, path: str, endpoint_url: str, timeout: float):
         self._path = path
         self._endpoint_url = endpoint_url
+        self._endpoint_timeout = timeout
         self._backing_mgr = OWLOntologyManager_Owlready2()
         self._backing_onto = self._backing_mgr.load_ontology(IRI.create('file://' + self._path))
 
@@ -135,7 +136,8 @@ class TentrisReasoner(OWLReasonerEx):
     def instances(self, ce: OWLClassExpression, direct: bool = False) -> Iterable[OWLNamedIndividual]:
         logger.warning("Instances(%s) method used", _debug_render(ce))
         res = httpx.get(self._ontology._endpoint_url + '/instances',
-                        params={'class_expression': _tentris_render(ce)})
+                        params={'class_expression': _tentris_render(ce)},
+                        timeout=self._ontology._endpoint_timeout)
         for i in res.json()['instances']:
             yield OWLNamedIndividual(IRI.create(i))
 
@@ -196,7 +198,7 @@ class TentrisKnowledgeBase(KnowledgeBase):
         self._total_req = 0
         self._current_req = 0
 
-        self._ontology = TentrisOntology(self.path, self.endpoint_url)
+        self._ontology = TentrisOntology(self.path, self.endpoint_url, timeout=50.0)
         self._reasoner = TentrisReasoner(self._ontology)
 
         if length_metric is not None:
@@ -285,6 +287,6 @@ class TentrisKnowledgeBase(KnowledgeBase):
             e.q = 0
             return e
         e.q = float(res.text)
-        await res.aclose()
-        logger.debug(f"CLOSE:{id_}")
+        # await res.aclose()
+        # logger.debug(f"CLOSE:{id_}")
         return e
