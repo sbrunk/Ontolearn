@@ -2,7 +2,7 @@ from collections import defaultdict
 import logging
 import operator
 from functools import singledispatchmethod, reduce
-from itertools import repeat
+from itertools import repeat, chain
 from types import MappingProxyType, FunctionType
 from typing import DefaultDict, Iterable, Dict, Mapping, Set, Type, TypeVar, Union, Optional, FrozenSet
 
@@ -30,7 +30,7 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
                 '_property_cache', \
                 '_obj_prop', '_obj_prop_inv', '_data_prop', \
                 '_negation_default', \
-                '__warned'
+                '__warned', '_sub_properties'
 
     _ontology: OWLOntology
     _base_reasoner: OWLReasoner
@@ -51,9 +51,10 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
     _data_prop: Dict[OWLDataProperty, Mapping[OWLNamedIndividual, Set[OWLLiteral]]]
     _property_cache: bool
     _negation_default: bool
+    _sub_properties: bool
 
     def __init__(self, ontology: OWLOntology, base_reasoner: OWLReasoner, *,
-                 property_cache=True, negation_default=False):
+                 property_cache=True, negation_default=False, sub_properties=False):
         """Fast instance checker
 
         Args:
@@ -67,6 +68,7 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
         self._base_reasoner = base_reasoner
         self._property_cache = property_cache
         self._negation_default = negation_default
+        self._sub_properties = sub_properties
         self.__warned = 0
         self._init()
 
@@ -116,13 +118,14 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
     def same_individuals(self, ce: OWLNamedIndividual) -> Iterable[OWLNamedIndividual]:
         yield from self._base_reasoner.same_individuals(ce)
 
-    def data_property_values(self, ind: OWLNamedIndividual, pe: OWLDataProperty) -> Iterable[OWLLiteral]:
-        yield from self._base_reasoner.data_property_values(ind, pe)
+    def data_property_values(self, ind: OWLNamedIndividual, pe: OWLDataProperty, direct: bool = True) \
+            -> Iterable[OWLLiteral]:
+        yield from self._base_reasoner.data_property_values(ind, pe, direct)
 
     def all_data_property_values(self, pe: OWLDataProperty) -> Iterable[OWLLiteral]:
         yield from self._base_reasoner.all_data_property_values(pe)
 
-    def object_property_values(self, ind: OWLNamedIndividual, pe: OWLObjectPropertyExpression) \
+    def object_property_values(self, ind: OWLNamedIndividual, pe: OWLObjectPropertyExpression, direct: bool = True) \
             -> Iterable[OWLNamedIndividual]:
         if self._property_cache:
             self._lazy_cache_obj_prop(pe)
@@ -133,7 +136,7 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
             else:
                 raise NotImplementedError
         else:
-            yield from self._base_reasoner.object_property_values(ind, pe)
+            yield from self._base_reasoner.object_property_values(ind, pe, direct=direct)
 
     def flush(self) -> None:
         self._base_reasoner.flush()
@@ -199,7 +202,15 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
             import owlready2
             # _x => owlready2 objects
             p_x: owlready2.ObjectProperty = self._ontology._world[pe.get_named_property().get_iri().as_str()]
-            for l_x, r_x in p_x.get_relations():
+            if self._sub_properties:
+                relations = chain.from_iterable(map(lambda x:
+                                                    self._ontology._world[x.get_named_property()
+                                                                          .get_iri().as_str()].get_relations(),
+                                                self.sub_object_properties(pe)))
+                relations = chain.from_iterable((relations, p_x.get_relations()))
+            else:
+                relations = p_x.get_relations()
+            for l_x, r_x in relations:
                 if inverse:
                     o_x = l_x
                     s_x = r_x
@@ -214,7 +225,7 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
                     opc[s] |= {o}
         else:
             for s in self._ind_set:
-                individuals = set(self._base_reasoner.object_property_values(s, pe))
+                individuals = set(self._base_reasoner.object_property_values(s, pe, not self._sub_properties))
                 if individuals:
                     opc[s] = individuals
 
@@ -249,7 +260,15 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
                 import owlready2
                 # _x => owlready2 objects
                 p_x: Union[owlready2.ObjectProperty, owlready2.DataProperty] = self._ontology._world[iri.as_str()]
-                for s_x, o_x in p_x.get_relations():
+                if self._sub_properties:
+                    relations = chain.from_iterable(map(lambda x:
+                                                        self._ontology._world[x.get_named_property()
+                                                                              .get_iri().as_str()].get_relations(),
+                                                    self.sub_object_properties(pe)))
+                    relations = chain.from_iterable((relations, p_x.get_relations()))
+                else:
+                    relations = p_x.get_relations()
+                for s_x, o_x in relations:
                     if inverse:
                         l_x = o_x
                     else:
@@ -264,7 +283,7 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
 
                 for s in self._ind_set:
                     try:
-                        next(iter(func(s, pe)))
+                        next(iter(func(s, pe, not self._sub_properties)))
                         subs |= {s}
                     except StopIteration:
                         pass
@@ -303,7 +322,7 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
 
             for s in subs:
                 count = 0
-                for o in self._base_reasoner.object_property_values(s, pe):
+                for o in self._base_reasoner.object_property_values(s, pe, not self._sub_properties):
                     if {o} & filler_inds:
                         count = count + 1
                         if max_count is None and count >= min_count:
@@ -327,6 +346,14 @@ class OWLReasoner_FastInstanceChecker(OWLReasonerEx):
             import owlready2
             # _x => owlready2 objects
             p_x: owlready2.DataProperty = self._ontology._world[pe.get_iri().as_str()]
+            if self._sub_properties:
+                relations = chain.from_iterable(map(lambda x:
+                                                    self._ontology._world[x.get_named_property()
+                                                                          .get_iri().as_str()].get_relations(),
+                                                self.sub_data_properties(pe)))
+                relations = chain.from_iterable((relations, p_x.get_relations()))
+            else:
+                relations = p_x.get_relations()
             for s_x, o_x in p_x.get_relations():
                 if isinstance(s_x, owlready2.Thing):
                     o_literal = OWLLiteral(o_x)
